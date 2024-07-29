@@ -96,7 +96,7 @@ func (a *App) writeMsgsToCache(ctx context.Context, ch <-chan types.Message) {
 	for {
 		select {
 		case msg := <-ch:
-			log.Printf("получено сообщение для кэширования: %v", msg)
+			log.Printf("Получено сообщение для кеширования: %v", msg)
 			a.mutex.Lock()
 			a.cache[msg.FileID] = append(a.cache[msg.FileID], msg)
 			a.mutex.Unlock()
@@ -125,26 +125,31 @@ func (a *App) processCache() {
 	log.Println("обработка кэша")
 
 	a.mutex.Lock()
-	cacheCopy := make(map[string][]types.Message, len(a.cache))
-	for fileID, messages := range a.cache {
-		cacheCopy[fileID] = append([]types.Message{}, messages...)
-	}
-	a.mutex.Unlock()
+	defer a.mutex.Unlock()
 
-	for fileID, messages := range cacheCopy {
+	for fileID, messages := range a.cache {
+		if len(messages) == 0 {
+			continue
+		}
+
+		tempMessages := append([]types.Message{}, messages...)
+		a.cache[fileID] = a.cache[fileID][:0] // Очищаем текущий кэш, сохраняя выделенную память
+
 		filePath := filepath.Join(a.cfg.FilesDir, fileID+".txt")
 
 		for attempt := 1; attempt <= a.cfg.MaxRetries; attempt++ {
-			if err := a.writer.WriteToFile(filePath, messages); err != nil {
+			if err := a.writer.WriteToFile(filePath, tempMessages); err != nil {
 				log.Printf("ошибка при записи в файл %s: %v (попытка %d/%d)\n", filePath, err, attempt, a.cfg.MaxRetries)
 				time.Sleep(a.cfg.RetryInterval)
 			} else {
-				a.mutex.Lock()
-				delete(a.cache, fileID)
-				a.mutex.Unlock()
 				log.Printf("Файл %s успешно записан и кэш очищен", filePath)
 				break
 			}
+		}
+
+		// Если появились новые сообщения для этого файла, добавляем их обратно в кэш
+		if len(a.cache[fileID]) > 0 {
+			a.cache[fileID] = append(a.cache[fileID], tempMessages...)
 		}
 	}
 }

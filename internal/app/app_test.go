@@ -382,3 +382,69 @@ func TestExceedingMaxRetriesStopsRetrying(t *testing.T) {
 		t.Fatalf("Файл не должен существовать, так как все попытки записи завершились неудачно")
 	}
 }
+
+type SlowFileWriter struct {
+	Delay time.Duration
+}
+
+func (s *SlowFileWriter) WriteToFile(filePath string, messages []types.Message) error {
+	time.Sleep(s.Delay)
+
+	return (&types.DefaultFileWriter{}).WriteToFile(filePath, messages)
+}
+
+// Проверяет, что новые сообщения, добавленные во время записи, не теряются.
+func TestNewMessagesDuringWrite(t *testing.T) {
+	filesDir := filepath.Join("..", "..", "files", "TestNewMessagesDuringWrite")
+	if err := os.MkdirAll(filesDir, 0755); err != nil {
+		t.Fatalf("Не удалось создать директорию для файлов: %v", err)
+	}
+	defer os.RemoveAll(filesDir)
+
+	// Используем SlowFileWriter для имитирования задержки записи
+	writer := &SlowFileWriter{Delay: 2 * time.Second}
+	cfg := setupConfig(filesDir)
+	userRepo := repository.NewUserRepository(cfg.ValidTokens)
+	application := NewApp(cfg, writer, userRepo)
+	if err := application.AddUser(types.User{Token: "valid_token_1", FileID: "file1"}); err != nil {
+		t.Fatalf("Не удалось добавить пользователя: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go application.Start(ctx)
+
+	msgHandler := handler.NewMessageHandler(userRepo, application, cfg)
+
+	// Добавляем начальные сообщения
+	for i := 0; i < 5; i++ {
+		msgHandler.HandleMessage(types.Message{
+			Token:  "valid_token_1",
+			FileID: "file1",
+			Data:   fmt.Sprintf("data%d", i),
+		})
+	}
+
+	// Запуск процессора кеша в отдельной горутине
+	go func() {
+		time.Sleep(1 * time.Second)
+
+		application.processCache()
+	}()
+
+	// Добавляем новые сообщения после начала записи
+	time.Sleep(1 * time.Second)
+	for i := 5; i < 10; i++ {
+		msgHandler.HandleMessage(types.Message{
+			Token:  "valid_token_1",
+			FileID: "file1",
+			Data:   fmt.Sprintf("data%d", i),
+		})
+	}
+
+	time.Sleep(3 * time.Second)
+	application.Shutdown()
+
+	checkFile(t, filepath.Join(filesDir, "file1.txt"), generateExpectedData(10))
+}
