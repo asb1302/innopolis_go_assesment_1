@@ -58,8 +58,6 @@ func (a *App) Start(ctx context.Context) {
 
 	a.wg.Wait()
 
-	a.processCache()
-
 	log.Println("завершение приложения")
 }
 
@@ -116,6 +114,7 @@ func (a *App) writeFiles(ctx context.Context) {
 		case <-ticker.C:
 			a.processCache()
 		case <-ctx.Done():
+			a.processCache() // Очищаем кэш при завершении работы
 			return
 		}
 	}
