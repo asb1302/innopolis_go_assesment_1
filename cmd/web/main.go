@@ -17,16 +17,8 @@ import (
 )
 
 func main() {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	go func() {
-		sigint := make(chan os.Signal, 1)
-		signal.Notify(sigint, os.Interrupt, syscall.SIGTERM)
-		<-sigint
-		log.Println("получен сигнал прерывания, завершение работы")
-		cancel()
-	}()
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 
 	cfg := config.LoadConfig()
 
@@ -119,11 +111,8 @@ func main() {
 	<-ctx.Done()
 
 	log.Println("завершение работы сервера")
-
 	if err := server.Shutdown(context.Background()); err != nil {
 		log.Fatalf("Ошибка завершения работы сервера:%+v", err)
 	}
-
-	application.Shutdown()
 	log.Println("сервер успешно завершил работу")
 }
