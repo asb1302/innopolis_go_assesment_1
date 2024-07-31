@@ -430,7 +430,7 @@ func TestNewMessagesDuringWrite(t *testing.T) {
 	go func() {
 		time.Sleep(1 * time.Second)
 
-		application.processCache()
+		application.processCache() // чтобы симулировать сценарий, когда кэш обрабатывается и записывается в файл в то время, как новые сообщения продолжают поступать
 	}()
 
 	// Добавляем новые сообщения после начала записи

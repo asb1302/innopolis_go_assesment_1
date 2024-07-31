@@ -2,13 +2,13 @@ package app
 
 import (
 	"context"
-	"github.com/asb1302/innopolis_go_assesment_1/internal/repository"
 	"log"
 	"path/filepath"
 	"sync"
 	"time"
 
 	"github.com/asb1302/innopolis_go_assesment_1/internal/config"
+	"github.com/asb1302/innopolis_go_assesment_1/internal/repository"
 	"github.com/asb1302/innopolis_go_assesment_1/internal/types"
 )
 
@@ -19,6 +19,7 @@ type App struct {
 	queue       chan types.Message
 	mutex       sync.Mutex
 	wg          sync.WaitGroup
+	writeWg     sync.WaitGroup // добавлен новый WaitGroup для записи в файл
 	workerCount map[string]int
 	writer      types.FileWriter
 	userRepo    *repository.UserRepository
@@ -59,6 +60,7 @@ func (a *App) Start(ctx context.Context) {
 	<-ctx.Done()
 
 	a.wg.Wait()
+	a.writeWg.Wait() // ожидание завершения всех горутин записи
 
 	log.Println("завершение приложения")
 }
@@ -133,24 +135,26 @@ func (a *App) processCache() {
 			continue
 		}
 
+		// создание копии сообщений для безопасной обработки
 		tempMessages := append([]types.Message{}, messages...)
-		a.cache[fileID] = a.cache[fileID][:0] // Очищаем текущий кэш, сохраняя выделенную память
+		a.cache[fileID] = a.cache[fileID][:0] // очищаем текущий кэш
 
-		filePath := filepath.Join(a.cfg.FilesDir, fileID+".txt")
+		a.writeWg.Add(1)
+		go a.writeToFile(fileID, tempMessages)
+	}
+}
 
-		for attempt := 1; attempt <= a.cfg.MaxRetries; attempt++ {
-			if err := a.writer.WriteToFile(filePath, tempMessages); err != nil {
-				log.Printf("ошибка при записи в файл %s: %v (попытка %d/%d)\n", filePath, err, attempt, a.cfg.MaxRetries)
-				time.Sleep(a.cfg.RetryInterval)
-			} else {
-				log.Printf("Файл %s успешно записан и кэш очищен", filePath)
-				break
-			}
-		}
+func (a *App) writeToFile(fileID string, messages []types.Message) {
+	defer a.writeWg.Done()
+	filePath := filepath.Join(a.cfg.FilesDir, fileID+".txt")
 
-		// Если появились новые сообщения для этого файла, добавляем их обратно в кэш
-		if len(a.cache[fileID]) > 0 {
-			a.cache[fileID] = append(a.cache[fileID], tempMessages...)
+	for attempt := 1; attempt <= a.cfg.MaxRetries; attempt++ {
+		if err := a.writer.WriteToFile(filePath, messages); err != nil {
+			log.Printf("ошибка при записи в файл %s: %v (попытка %d/%d)\n", filePath, err, attempt, a.cfg.MaxRetries)
+			time.Sleep(a.cfg.RetryInterval)
+		} else {
+			log.Printf("Файл %s успешно записан и кэш очищен", filePath)
+			break
 		}
 	}
 }
@@ -196,6 +200,7 @@ func (a *App) SendMsg(msg types.Message) {
 func (a *App) Shutdown() {
 	log.Println("завершение работы, обработка оставшихся сообщений в кэше")
 	a.processCache()
+	a.writeWg.Wait() // ожидание завершения всех горутин записи
 	log.Println("завершение работы, кэш обработан")
 }
 
