@@ -39,16 +39,18 @@ func NewApp(cfg *config.Config, writer types.FileWriter, userRepo *repository.Us
 func (a *App) Start(ctx context.Context) {
 	log.Println("запуск приложения")
 
-	a.wg.Add(1)
-	go a.processQueue(ctx)
+	// Запуск воркеров для обработки общей очереди
+	for i := 0; i < a.cfg.NumWorkers; i++ {
+		a.wg.Add(1)
+		go a.processQueue(ctx)
+	}
 
+	// Запуск воркеров для каждого канала файла
 	for fileID, ch := range a.channels {
-		for i := 0; i < a.cfg.NumWorkers; i++ {
-			a.wg.Add(1)
-			go a.writeMsgsToCache(ctx, ch)
-			a.workerCount[fileID]++
-			log.Printf("запущен обработчик сообщений для файла: %s, воркер: %d", fileID, i)
-		}
+		a.wg.Add(1)
+		go a.writeMsgsToCache(ctx, ch)
+		a.workerCount[fileID]++
+		log.Printf("запущен обработчик сообщений для файла: %s", fileID)
 	}
 
 	a.wg.Add(1)
@@ -167,12 +169,11 @@ func (a *App) AddUser(user types.User) error {
 		a.channels[user.FileID] = make(chan types.Message, 1000)
 		log.Printf("Создан канал для файла: %s", user.FileID)
 
-		for i := 0; i < a.cfg.NumWorkers; i++ {
-			a.wg.Add(1)
-			go a.writeMsgsToCache(context.Background(), a.channels[user.FileID])
-			a.workerCount[user.FileID]++
-			log.Printf("запущен обработчик сообщений для файла: %s, воркер: %d", user.FileID, i)
-		}
+		// Запуск одного воркера для канала файла
+		a.wg.Add(1)
+		go a.writeMsgsToCache(context.Background(), a.channels[user.FileID])
+		a.workerCount[user.FileID]++
+		log.Printf("запущен обработчик сообщений для файла: %s", user.FileID)
 	}
 
 	log.Printf("пользователь добавлен: %v", user)
