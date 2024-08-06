@@ -1,0 +1,28 @@
+###
+
+### Добавление пользователя
+POST http://localhost:8080/add-user?token=valid_token_1&fileID=file1
+Accept: application/json
+
+###
+
+### Отправка сообщений
+POST http://localhost:8080/add-message?token=valid_token_1&fileID=file1&data=Hello
+Accept: application/json
+
+###
+POST http://localhost:8080/add-message?token=valid_token_1&fileID=file1&data=World
+Accept: application/json
+
+###
+
+### Отправка сообщений с недействительным токеном
+POST http://localhost:8080/add-message?token=invalid_token&fileID=file1&data=Invalid
+Accept: application/json
+
+###
+
+### Отправка сообщений с действительным токеном для несуществующего пользователя
+POST http://localhost:8080/add-message?token=valid_token_2&fileID=file1&data=Invalid
+Accept: application/json
+
